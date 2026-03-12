@@ -1124,7 +1124,14 @@ export default function App() {
                           );
                         }
 
-                        const modelInfo = msg.name ? MODELS[msg.name as keyof typeof MODELS] : null;
+                        const modelInfo = msg.name
+                          ? MODELS[msg.name as keyof typeof MODELS]
+                            || Object.values(MODELS).find(m => m.id === msg.name)
+                            || (msg.name === 'moderator' ? { id: 'moderator', color: '#fbbf24', tier: 'best' as const, description: 'Council Moderator' } : null)
+                          : null;
+                        const modelDisplayName = msg.name
+                          ? Object.entries(MODELS).find(([, m]) => m.id === msg.name)?.[0] || msg.name
+                          : null;
 
                         return (
                           <div key={i} className={cn(
@@ -1148,7 +1155,7 @@ export default function App() {
                                   {msg.role === 'model' && modelInfo ? (
                                     <>
                                       <span className="text-xs font-mono font-bold uppercase tracking-wider" style={{ color: modelInfo.color }}>
-                                        {msg.name}
+                                        {modelDisplayName || msg.name}
                                       </span>
                                       {msg.confidence !== undefined && (
                                         <span className="text-[10px] font-mono text-white/40">
