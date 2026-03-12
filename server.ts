@@ -89,11 +89,19 @@ const generateId = () => {
 };
 
 // --- SSE helpers ---
-// Global SSE subscribers (for the /events endpoint the frontend uses)
+// Global SSE subscribers (for the /events endpoint the frontend uses — local dev only)
 const globalClients: express.Response[] = [];
+
+// Inline stream target — the response object for the current /start request
+let inlineStreamTarget: express.Response | null = null;
 
 function sendEvent(threadId: string, data: any) {
   const payload = `data: ${JSON.stringify({ ...data, thread_id: threadId })}\n\n`;
+
+  // Send to inline stream target (serverless: the /start response itself)
+  if (inlineStreamTarget) {
+    try { inlineStreamTarget.write(payload); } catch {}
+  }
 
   // Send to thread-specific subscribers
   const resArr = clients.get(threadId) || [];
@@ -101,7 +109,7 @@ function sendEvent(threadId: string, data: any) {
     try { res.write(payload); } catch {}
   }
 
-  // Send to global subscribers
+  // Send to global subscribers (local dev)
   for (const res of globalClients) {
     try { res.write(payload); } catch {}
   }
@@ -402,7 +410,7 @@ function detectAddressedModels(text: string, threadModels: string[]): string[] {
 
 // --- Routes ---
 
-app.post("/start", (req, res) => {
+app.post("/start", async (req, res) => {
   const topic = req.body.topic?.trim();
   const models = req.body.models || ["claude", "gemini", "gpt5", "deepseek"];
   const systemContext = req.body.systemContext?.trim();
@@ -415,12 +423,25 @@ app.post("/start", (req, res) => {
     systemContext,
   });
 
-  res.json({ thread_id: tid });
+  // Stream SSE directly on this response (works in serverless)
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
 
-  runDiscussion(tid, topic, models).catch(err => {
+  // Send thread_id as first event so frontend knows it
+  res.write(`data: ${JSON.stringify({ type: "thread_created", thread_id: tid, topic })}\n\n`);
+
+  inlineStreamTarget = res;
+  try {
+    await runDiscussion(tid, topic, models);
+  } catch (err: any) {
     console.error("Discussion error:", err);
     addMessage(tid, { type: "status", phase: "error", text: `Discussion error: ${err.message}` });
-  });
+  } finally {
+    inlineStreamTarget = null;
+    res.end();
+  }
 });
 
 // Programmatic API endpoint — agents call this
@@ -449,8 +470,18 @@ app.post("/api/ask", requireApiKey, async (req, res) => {
       messages: thread?.messages?.filter((m: any) => m.done && m.text && !m.typing) || [],
     });
   } else {
-    res.json({ thread_id: tid, status: "active" });
-    runDiscussion(tid, question, models).catch(console.error);
+    // Stream SSE inline
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.write(`data: ${JSON.stringify({ type: "thread_created", thread_id: tid })}\n\n`);
+    inlineStreamTarget = res;
+    try {
+      await runDiscussion(tid, question, models);
+    } finally {
+      inlineStreamTarget = null;
+      res.end();
+    }
   }
 });
 
@@ -461,7 +492,7 @@ app.get("/threads", (req, res) => {
   })));
 });
 
-app.post("/human", (req, res) => {
+app.post("/human", async (req, res) => {
   const tid = req.body.thread_id;
   const text = req.body.text?.trim();
   if (!text) return res.status(400).json({ error: "Empty" });
@@ -469,9 +500,23 @@ app.post("/human", (req, res) => {
   const thread = threads.get(tid);
   if (!thread) return res.status(404).json({ error: "Thread not found" });
 
+  // Stream SSE for follow-ups too
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+
   addMessage(tid, { type: "message", role: "human", name: "human", text, done: true });
-  handleFollowup(tid, text, req.body.models).catch(console.error);
-  res.json({ success: true });
+
+  inlineStreamTarget = res;
+  try {
+    await handleFollowup(tid, text, req.body.models);
+  } catch (err: any) {
+    console.error("Followup error:", err);
+  } finally {
+    inlineStreamTarget = null;
+    res.end();
+  }
 });
 
 app.post("/save/:threadId", (req, res) => {

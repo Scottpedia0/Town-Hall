@@ -95,7 +95,7 @@ export default function App() {
   const [templateContents, setTemplateContents] = useState<Record<string, string>>(DEFAULT_TEMPLATES);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -105,21 +105,30 @@ export default function App() {
     scrollToBottom();
   }, [messages, isTyping]);
 
+  // Load threads from localStorage (serverless has no persistent memory)
   useEffect(() => {
-    fetchThreads();
-    // Load protocols from local storage for UI persistence
+    const saved = localStorage.getItem('council_threads');
+    if (saved) {
+      try { setThreads(JSON.parse(saved)); } catch {}
+    }
     const savedProtocols = localStorage.getItem('townhall_protocols');
     if (savedProtocols) setProtocols(new Set(JSON.parse(savedProtocols)));
   }, []);
 
+  // Save threads to localStorage whenever they change
+  useEffect(() => {
+    if (threads.length > 0) {
+      localStorage.setItem('council_threads', JSON.stringify(threads));
+    }
+  }, [threads]);
+
   const fetchThreads = async () => {
+    // On serverless, /threads may be empty — merge with localStorage
     try {
       const res = await fetch('/threads');
       const data = await res.json();
-      setThreads(data);
-    } catch (err) {
-      console.error('Failed to fetch threads', err);
-    }
+      if (data.length > 0) setThreads(data);
+    } catch {}
   };
 
   const fetchThreadDetail = async (tid: string) => {
@@ -144,99 +153,201 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
+  // Process an SSE data event from the stream
+  const processSSEData = (data: any) => {
+    if (data.ping) return;
+
+    if (data.type === 'thread_created') {
+      // First event — thread ID
+      return;
     }
 
-    const es = new EventSource('/events');
-    eventSourceRef.current = es;
+    if (data.typing !== undefined) {
+      setIsTyping(data.typing);
+      return;
+    }
 
-    es.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.thread_id !== activeThreadId && activeThreadId !== null) return;
+    if (data.phase !== undefined) {
+      setPhase(data.phase);
+      if (!data.text && !data.round && !data.recap) return;
+    }
 
-      if (data.typing !== undefined) {
-        setIsTyping(data.typing);
-        return;
+    if (data.round) {
+      setCurrentRound(data.round);
+      setMessages(prev => [...prev, { ...data, role: 'system', text: data.round }]);
+      return;
+    }
+
+    if (data.type === 'recap' || data.recap) {
+      setRecap(data.text || data.recap);
+      if (data.confidence !== undefined) setFinalConfidence(data.confidence);
+      if (data.isConsensus !== undefined) setIsConsensus(data.isConsensus);
+      if (data.recommendation !== undefined) setRecommendation(data.recommendation);
+      if (data.keyCaveat !== undefined) setKeyCaveat(data.keyCaveat);
+      if (data.nextStep !== undefined) setNextStep(data.nextStep);
+      if (data.elapsedTime !== undefined) setElapsedTime(data.elapsedTime);
+      if (data.estimatedCost !== undefined) setEstimatedCost(data.estimatedCost);
+      if (data.agentPayload !== undefined) setAgentPayload(data.agentPayload);
+      setIsTranscriptExpanded(false);
+      return;
+    }
+
+    if (data.done && data.phase === 'complete') {
+      setIsTyping(false);
+      setIsLoading(false);
+      return;
+    }
+
+    if (data.text) {
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        // If same model sent a non-done message, replace it (streaming update)
+        if (last && last.name === data.name && last.role === data.role && !last.done) {
+          return [...prev.slice(0, -1), {
+            ...last,
+            text: data.text, // Replace, not append (server sends full text each time)
+            done: data.done,
+            phase: data.phase || last.phase,
+            confidence: data.confidence !== undefined ? data.confidence : last.confidence,
+            assumptions: data.assumptions || last.assumptions
+          }];
+        }
+        return [...prev, data];
+      });
+    }
+  };
+
+  // Read SSE events from a fetch Response stream
+  const readSSEStream = async (response: Response) => {
+    const reader = response.body?.getReader();
+    if (!reader) return;
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // Parse SSE frames
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            processSSEData(data);
+          } catch {}
+        }
       }
-
-      if (data.phase !== undefined) {
-        setPhase(data.phase);
-        if (!data.text && !data.round && !data.recap) return;
-      }
-
-      if (data.round) {
-        setCurrentRound(data.round);
-        setMessages(prev => [...prev, { ...data, role: 'system', text: data.round }]);
-        return;
-      }
-
-      if (data.recap) {
-        setRecap(data.recap);
-        if (data.confidence !== undefined) setFinalConfidence(data.confidence);
-        if (data.isConsensus !== undefined) setIsConsensus(data.isConsensus);
-        if (data.recommendation !== undefined) setRecommendation(data.recommendation);
-        if (data.keyCaveat !== undefined) setKeyCaveat(data.keyCaveat);
-        if (data.nextStep !== undefined) setNextStep(data.nextStep);
-        if (data.elapsedTime !== undefined) setElapsedTime(data.elapsedTime);
-        if (data.estimatedCost !== undefined) setEstimatedCost(data.estimatedCost);
-        if (data.agentPayload !== undefined) setAgentPayload(data.agentPayload);
-        setIsTranscriptExpanded(false);
-        return;
-      }
-
-      if (data.done) {
-        setIsTyping(false);
-        fetchThreads();
-        return;
-      }
-
-      if (data.text) {
-        setMessages(prev => {
-          const last = prev[prev.length - 1];
-          if (last && last.name === data.name && last.role === data.role && !last.done) {
-            return [...prev.slice(0, -1), { 
-              ...last, 
-              text: last.text + data.text,
-              phase: data.phase || last.phase,
-              confidence: data.confidence !== undefined ? data.confidence : last.confidence,
-              assumptions: data.assumptions || last.assumptions
-            }];
-          }
-          return [...prev, data];
-        });
-      }
-    };
-
-    return () => es.close();
-  }, [activeThreadId]);
+    }
+    // Process any remaining buffer
+    if (buffer.startsWith('data: ')) {
+      try {
+        const data = JSON.parse(buffer.slice(6));
+        processSSEData(data);
+      } catch {}
+    }
+  };
 
   const handleStart = async () => {
     if (!inputText.trim()) return;
+    const topic = inputText.trim();
     setIsLoading(true);
-    try {
-      // Use /api/ask if custom models are selected, otherwise /start
-      const isCustom = selectedModels.size !== Object.keys(MODELS).length;
-      const endpoint = isCustom ? '/api/ask' : '/start';
-      const body = isCustom 
-        ? { question: inputText, models: Array.from(selectedModels).map(m => MODELS[m].id), tier, stakes, reversible, confidenceThreshold, synthesisStrategy, template: selectedTemplate, templateContent: templateContents[selectedTemplate], businessContext, isRagConnected }
-        : { topic: inputText, tier, stakes, reversible, confidenceThreshold, synthesisStrategy, template: selectedTemplate, templateContent: templateContents[selectedTemplate], businessContext, isRagConnected };
+    setMessages([]);
+    setRecap(null);
+    setIsTranscriptExpanded(true);
+    setPhase('blind_draft');
+    setInputText('');
 
-      const res = await fetch(endpoint, {
+    // Abort any previous stream
+    if (abortRef.current) abortRef.current.abort();
+    const abort = new AbortController();
+    abortRef.current = abort;
+
+    try {
+      const body = {
+        topic,
+        models: Array.from(selectedModels).map(m => MODELS[m].id),
+        tier, stakes, reversible, confidenceThreshold, synthesisStrategy,
+        template: selectedTemplate,
+        templateContent: templateContents[selectedTemplate],
+        businessContext, isRagConnected,
+      };
+
+      const res = await fetch('/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: abort.signal,
       });
-      const data = await res.json();
-      setActiveThreadId(data.thread_id);
-      setMessages([]);
-      setRecap(null);
-      setIsTranscriptExpanded(true);
-      setInputText('');
-      fetchThreads();
-    } catch (err) {
-      console.error('Failed to start thread', err);
+
+      // Read thread_id from first event, then set it
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('text/event-stream')) {
+        // Clone the response so we can peek at the first event
+        // Actually just process the whole stream — thread_created will come first
+        let threadId: string | null = null;
+
+        const reader = res.body?.getReader();
+        if (!reader) return;
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const lines = buffer.split('\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const data = JSON.parse(line.slice(6));
+                if (data.type === 'thread_created' && data.thread_id) {
+                  threadId = data.thread_id;
+                  setActiveThreadId(threadId);
+                  // Add thread to sidebar
+                  setThreads(prev => [{
+                    id: threadId!,
+                    topic,
+                    status: 'active' as const,
+                    source: 'live' as const,
+                    created: new Date().toISOString(),
+                  }, ...prev]);
+                } else {
+                  processSSEData(data);
+                }
+              } catch {}
+            }
+          }
+        }
+
+        // Update thread status to complete in sidebar
+        if (threadId) {
+          setThreads(prev => prev.map(t =>
+            t.id === threadId ? { ...t, status: 'complete' as const } : t
+          ));
+        }
+      } else {
+        // Fallback: JSON response (local dev)
+        const data = await res.json();
+        setActiveThreadId(data.thread_id);
+        setThreads(prev => [{
+          id: data.thread_id,
+          topic,
+          status: 'active' as const,
+          source: 'live' as const,
+          created: new Date().toISOString(),
+        }, ...prev]);
+      }
+    } catch (err: any) {
+      if (err.name !== 'AbortError') {
+        console.error('Failed to start thread', err);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -250,7 +361,7 @@ export default function App() {
 
     const lowerText = text.toLowerCase();
     const mentionsAll = lowerText.includes('all') || lowerText.includes('everyone') || lowerText.includes("y'all");
-    
+
     let modelsToAddress = Array.from(selectedModels).map(m => MODELS[m].id) as string[];
 
     if (!mentionsAll) {
@@ -259,12 +370,11 @@ export default function App() {
       if (lowerText.includes('gemini')) explicitModels.push(MODELS['Gemini 3.1 Pro'].id);
       if (lowerText.includes('gpt')) explicitModels.push(MODELS['GPT-5.4 Pro'].id);
       if (lowerText.includes('o3')) explicitModels.push(MODELS['o3-Pro'].id);
-      if (lowerText.includes('deepseek') || lowerText.includes('r1')) explicitModels.push(MODELS['DeepSeek R1'].id);
+      if (lowerText.includes('deepseek') || lowerText.includes('r1')) explicitModels.push(MODELS['DeepSeek V3.2'].id);
       if (lowerText.includes('haiku')) explicitModels.push(MODELS['Claude 3.5 Haiku'].id);
-      if (lowerText.includes('flash')) explicitModels.push(MODELS['Gemini 3.1 Flash'].id);
-      if (lowerText.includes('mini')) explicitModels.push(MODELS['GPT-4o-mini'].id);
-      if (lowerText.includes('llama')) explicitModels.push(MODELS['Llama 3.3 70B'].id);
-      
+      if (lowerText.includes('flash')) explicitModels.push(MODELS['Gemini Flash'].id);
+      if (lowerText.includes('mini')) explicitModels.push(MODELS['GPT-4o Mini'].id);
+
       if (explicitModels.length > 0) {
         modelsToAddress = explicitModels;
         const newSelected = new Set<ModelKey>();
@@ -279,16 +389,22 @@ export default function App() {
     }
 
     try {
-      await fetch('/human', {
+      const res = await fetch('/human', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          thread_id: activeThreadId, 
+        body: JSON.stringify({
+          thread_id: activeThreadId,
           text,
           models: modelsToAddress,
           tier
         }),
       });
+
+      // Read SSE stream from follow-up response
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('text/event-stream')) {
+        await readSSEStream(res);
+      }
     } catch (err) {
       console.error('Failed to send human message', err);
     }
