@@ -405,8 +405,8 @@ function detectAddressedModels(text: string, threadModels: string[]): string[] {
 
 app.post("/start", (req, res) => {
   const topic = req.body.topic?.trim();
-  const models = req.body.models || ["claude", "gemini", "gpt5"];
-  const systemContext = req.body.systemContext?.trim(); // Human-injected system prompt
+  const models = req.body.models || ["claude", "gemini", "gpt5", "deepseek"];
+  const systemContext = req.body.systemContext?.trim();
   if (!topic) return res.status(400).json({ error: "No topic" });
 
   const tid = generateId();
@@ -429,9 +429,8 @@ app.post("/start", (req, res) => {
 // sync=false (default for UI): returns immediately, streams via SSE
 app.post("/api/ask", requireApiKey, async (req, res) => {
   const question = req.body.question?.trim();
-  const models = req.body.models || ["claude", "gemini", "gpt5"];
+  const models = req.body.models || ["claude", "gemini", "gpt5", "deepseek"];
   const systemContext = req.body.systemContext?.trim();
-  // Default: sync for API callers (who explicitly set sync), async for UI
   const sync = req.body.sync === true;
 
   if (!question) return res.status(400).json({ error: "No question" });
@@ -529,6 +528,24 @@ app.get("/thread/:tid", (req, res) => {
   res.json({
     ...thread,
     messages: thread.messages.filter((m: any) => !m.typing && !m.ping),
+  });
+});
+
+// Polling endpoint — alternative to SSE for serverless environments
+app.get("/api/messages/:tid", (req, res) => {
+  const thread = threads.get(req.params.tid);
+  if (!thread) return res.status(404).json({ error: "Not found" });
+
+  const since = parseInt(req.query.since as string) || 0;
+  const msgs = thread.messages
+    .filter((m: any, i: number) => i >= since && !m.typing && !m.ping)
+    .map((m: any, i: number) => ({ ...m, index: since + i }));
+
+  res.json({
+    messages: msgs,
+    status: thread.status,
+    total: thread.messages.filter((m: any) => !m.typing && !m.ping).length,
+    recap: thread.recap,
   });
 });
 
