@@ -180,7 +180,7 @@ export default function App() {
 
     if (data.type === 'recap' || data.recap) {
       setRecap(data.text || data.recap);
-      if (data.confidence !== undefined) setFinalConfidence(data.confidence);
+      if (data.confidence !== undefined) setFinalConfidence(data.confidence > 1 ? data.confidence / 100 : data.confidence);
       if (data.isConsensus !== undefined) setIsConsensus(data.isConsensus);
       if (data.recommendation !== undefined) setRecommendation(data.recommendation);
       if (data.keyCaveat !== undefined) setKeyCaveat(data.keyCaveat);
@@ -494,7 +494,7 @@ export default function App() {
         <div className="p-4 border-b border-[#262626] flex items-center justify-between">
           <div className="flex items-center gap-2 font-bold text-lg tracking-tight">
             <Terminal className="w-5 h-5 text-blue-500" />
-            TOWN HALL
+            COWORK COUNCIL
           </div>
           <button 
             onClick={() => {
@@ -1159,7 +1159,7 @@ export default function App() {
                                       </span>
                                       {msg.confidence !== undefined && (
                                         <span className="text-[10px] font-mono text-white/40">
-                                          CONF: {Math.round(msg.confidence * 100)}%
+                                          CONF: {Math.round(msg.confidence > 1 ? msg.confidence : msg.confidence * 100)}%
                                         </span>
                                       )}
                                       {msg.phase === 'blind_draft' && (
@@ -1175,7 +1175,7 @@ export default function App() {
                                     </>
                                   ) : (
                                     <span className="text-xs font-mono font-bold uppercase tracking-wider text-blue-400">
-                                      OPERATOR
+                                      MODERATOR
                                     </span>
                                   )}
                                 </div>
