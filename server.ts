@@ -586,4 +586,9 @@ async function startServer() {
   });
 }
 
-startServer();
+// On Vercel, export the app for serverless. Locally, start the server.
+if (!process.env.VERCEL) {
+  startServer();
+}
+
+export default app;
