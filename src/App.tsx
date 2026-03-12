@@ -82,7 +82,7 @@ export default function App() {
   const [filterModel, setFilterModel] = useState<ModelKey | 'all'>('all');
   const [protocols, setProtocols] = useState<Set<string>>(new Set());
   const [showProtocolsOnly, setShowProtocolsOnly] = useState(false);
-  const [tier, setTier] = useState<'fast' | 'frontier'>('frontier');
+  const [tier, setTier] = useState<'strong' | 'frontier'>('frontier');
   const [isTranscriptExpanded, setIsTranscriptExpanded] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState<string>('general');
   const [businessContext, setBusinessContext] = useState<string>('');
@@ -414,14 +414,10 @@ export default function App() {
     if (!mentionsAll) {
       const explicitModels: string[] = [];
       if (lowerText.includes('claude') || lowerText.includes('opus')) explicitModels.push(MODELS['Claude Opus 4.6'].id);
-      if (lowerText.includes('gemini') && !lowerText.includes('flash')) explicitModels.push(MODELS['Gemini 3.1 Pro'].id);
-      if (lowerText.includes('gpt') && !lowerText.includes('mini')) explicitModels.push(MODELS['GPT-5.4'].id);
-      if (lowerText.includes('o3')) explicitModels.push(MODELS['o3-Pro'].id);
+      if (lowerText.includes('gemini')) explicitModels.push(MODELS['Gemini 3.1 Pro'].id);
+      if (lowerText.includes('gpt')) explicitModels.push(MODELS['GPT-5.4'].id);
       if (lowerText.includes('deepseek')) explicitModels.push(MODELS['DeepSeek V3.2'].id);
       if (lowerText.includes('grok')) explicitModels.push(MODELS['Grok 4'].id);
-      if (lowerText.includes('haiku')) explicitModels.push(MODELS['Claude Haiku'].id);
-      if (lowerText.includes('flash')) explicitModels.push(MODELS['Gemini Flash'].id);
-      if (lowerText.includes('mini')) explicitModels.push(MODELS['GPT-5 Mini'].id);
 
       if (explicitModels.length > 0) {
         modelsToAddress = explicitModels;
@@ -748,25 +744,18 @@ export default function App() {
                   </h3>
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={() => setSelectedModels(new Set(Object.keys(MODELS).filter(k => MODELS[k as ModelKey].tier === 'best') as ModelKey[]))}
+                      onClick={() => setSelectedModels(new Set(Object.keys(MODELS).filter(k => MODELS[k as ModelKey].tier === 'frontier') as ModelKey[]))}
                       className="text-[10px] uppercase tracking-widest font-bold px-2 py-1 rounded-md transition-colors bg-blue-500/10 text-blue-400 border border-blue-500/20 hover:bg-blue-500/20"
-                      title="Deep Research / Reasoning Models (Slow)"
+                      title="Frontier models — Claude, GPT-5.4, Grok 4"
                     >
-                      Deep Research
+                      Frontier
                     </button>
                     <button
-                      onClick={() => setSelectedModels(new Set(Object.keys(MODELS).filter(k => MODELS[k as ModelKey].tier === 'fast') as ModelKey[]))}
+                      onClick={() => setSelectedModels(new Set(Object.keys(MODELS).filter(k => MODELS[k as ModelKey].tier === 'strong') as ModelKey[]))}
                       className="text-[10px] uppercase tracking-widest font-bold px-2 py-1 rounded-md transition-colors bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20"
-                      title="Standard Flagship Models (Smart & Fast)"
+                      title="Strong models at great value — Gemini Pro, DeepSeek"
                     >
-                      Fast (Standard)
-                    </button>
-                    <button
-                      onClick={() => setSelectedModels(new Set(Object.keys(MODELS).filter(k => MODELS[k as ModelKey].tier === 'light') as ModelKey[]))}
-                      className="text-[10px] uppercase tracking-widest font-bold px-2 py-1 rounded-md transition-colors bg-purple-500/10 text-purple-400 border border-purple-500/20 hover:bg-purple-500/20"
-                      title="Lightweight Models (Lightning Fast)"
-                    >
-                      Lightweight
+                      Value
                     </button>
                     <button
                       onClick={() => setSelectedModels(new Set(Object.keys(MODELS) as ModelKey[]))}
@@ -1177,7 +1166,7 @@ export default function App() {
                         const modelInfo = msg.name
                           ? MODELS[msg.name as keyof typeof MODELS]
                             || Object.values(MODELS).find(m => m.id === msg.name)
-                            || (msg.name === 'moderator' ? { id: 'moderator', color: '#fbbf24', tier: 'best' as const, description: 'Council Moderator' } : null)
+                            || (msg.name === 'moderator' ? { id: 'moderator', color: '#fbbf24', tier: 'frontier' as const, description: 'Council Moderator' } : null)
                           : null;
                         const modelDisplayName = msg.name
                           ? Object.entries(MODELS).find(([, m]) => m.id === msg.name)?.[0] || msg.name
@@ -1387,18 +1376,18 @@ export default function App() {
               <span>•</span>
               <span className="flex items-center gap-1"><FileText className="w-3 h-3" /> Markdown supported</span>
               <span>•</span>
-              <button 
-                onClick={() => setTier(t => t === 'fast' ? 'frontier' : 'fast')}
+              <button
+                onClick={() => setTier(t => t === 'strong' ? 'frontier' : 'strong')}
                 className={cn(
                   "flex items-center gap-1.5 px-2 py-1 rounded-md transition-all border",
-                  tier === 'fast' 
-                    ? "bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20" 
+                  tier === 'strong'
+                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20"
                     : "bg-purple-500/10 border-purple-500/30 text-purple-400 hover:bg-purple-500/20"
                 )}
-                title="Toggle between fast (middle-tier) and frontier (highest quality) models"
+                title="Toggle between value (Gemini + DeepSeek) and frontier (Claude, GPT-5.4, Grok) models"
               >
-                {tier === 'fast' ? <Zap className="w-3 h-3" /> : <Brain className="w-3 h-3" />}
-                {tier === 'fast' ? 'Fast Mode' : 'Frontier Mode'}
+                {tier === 'strong' ? <Zap className="w-3 h-3" /> : <Brain className="w-3 h-3" />}
+                {tier === 'strong' ? 'Value Mode' : 'Frontier Mode'}
               </button>
             </div>
             {activeThreadId && (
