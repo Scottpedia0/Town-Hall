@@ -31,14 +31,18 @@ interface ModelConfig {
 }
 
 const MODELS: Record<string, ModelConfig> = {
+  // Best tier — deep thinkers, highest quality
   claude:   { name: "Claude Opus 4.6",  color: "#5b9bf5", role: "Architect",      provider: "openrouter", modelId: "anthropic/claude-opus-4.6",          tier: "best" },
-  gemini:   { name: "Gemini 3.1 Pro",   color: "#34d399", role: "Context Keeper", provider: "openrouter", modelId: "google/gemini-3.1-pro-preview",       tier: "fast" },
-  gpt5:     { name: "GPT-5.4 Pro",      color: "#a78bfa", role: "Challenger",     provider: "openrouter", modelId: "openai/gpt-5.4-pro",                 tier: "fast" },
   o3:       { name: "o3-Pro",           color: "#ef4444", role: "Reasoning",      provider: "openrouter", modelId: "openai/o3-pro",                      tier: "best" },
-  deepseek: { name: "DeepSeek V3.2",    color: "#fb923c", role: "Logic Checker",  provider: "openrouter", modelId: "deepseek/deepseek-v3.2-speciale",    tier: "fast" },
-  haiku:      { name: "Claude 3.5 Haiku", color: "#60a5fa", role: "Fast Analyst",  provider: "openrouter", modelId: "anthropic/claude-3.5-haiku",         tier: "light" },
+  grok:     { name: "Grok 4",           color: "#1d9bf0", role: "Contrarian",     provider: "openrouter", modelId: "x-ai/grok-4",                        tier: "best" },
+  // Fast tier — smart and quick
+  gemini:   { name: "Gemini 3.1 Pro",   color: "#34d399", role: "Context Keeper", provider: "openrouter", modelId: "google/gemini-3.1-pro-preview",       tier: "fast" },
+  gpt5:     { name: "GPT-5.4",          color: "#a78bfa", role: "Challenger",     provider: "openrouter", modelId: "openai/gpt-5.4",                     tier: "fast" },
+  deepseek: { name: "DeepSeek V3.2",    color: "#fb923c", role: "Logic Checker",  provider: "openrouter", modelId: "deepseek/deepseek-v3.2",             tier: "fast" },
+  // Light tier — fast and cheap
+  haiku:      { name: "Claude Haiku",     color: "#60a5fa", role: "Fast Analyst",  provider: "openrouter", modelId: "anthropic/claude-3.5-haiku",         tier: "light" },
   flash:      { name: "Gemini Flash",     color: "#10b981", role: "Fast Context",  provider: "openrouter", modelId: "google/gemini-3.1-flash-lite-preview", tier: "light" },
-  "gpt4o-mini": { name: "GPT-4o Mini",   color: "#c084fc", role: "Fast General",  provider: "openrouter", modelId: "openai/gpt-4o-mini",                 tier: "light" },
+  "gpt5-mini": { name: "GPT-5 Mini",     color: "#c084fc", role: "Fast General",  provider: "openrouter", modelId: "openai/gpt-5-mini",                  tier: "light" },
 };
 
 // Role-specific system prompts
@@ -62,21 +66,27 @@ Quantify when possible — time, cost, probability, effort.`,
   deepseek: `You are the Logic Checker in a multi-AI decision council for a startup founder (Scott, CEO of Cowork.ai).
 Your job: verify everyone's reasoning. Does the conclusion follow from the premises? Hidden assumptions?
 Rate confidence levels. Identify what would change the answer.`,
+
+  grok: `You are the Contrarian in a multi-AI decision council for a startup founder (Scott, CEO of Cowork.ai).
+Your job: challenge conventional wisdom. What is everyone else missing? What's the unconventional take that might actually be right?
+Be provocatively honest — if the consensus is wrong, say so. But back it up with reasoning, not just contrarianism.`,
 };
 
 const DEFAULT_SYSTEM = "You are an AI analyst in a decision council. Get to the right answer. Be thorough.";
 
 // --- Cost tracking ---
 // OpenRouter pricing per 1M tokens (approximate, updated March 2026)
+// Pricing per 1M tokens from OpenRouter (March 2026)
 const MODEL_PRICING: Record<string, { input: number; output: number }> = {
-  "anthropic/claude-opus-4.6":          { input: 15, output: 75 },
-  "google/gemini-3.1-pro-preview":      { input: 1.25, output: 5 },
-  "openai/gpt-5.4-pro":                 { input: 10, output: 30 },
+  "anthropic/claude-opus-4.6":          { input: 5, output: 25 },
   "openai/o3-pro":                      { input: 20, output: 80 },
-  "deepseek/deepseek-v3.2-speciale":    { input: 0.5, output: 2 },
+  "x-ai/grok-4":                        { input: 3, output: 15 },
+  "google/gemini-3.1-pro-preview":      { input: 2, output: 12 },
+  "openai/gpt-5.4":                     { input: 2.5, output: 15 },
+  "deepseek/deepseek-v3.2":             { input: 0.26, output: 0.38 },
   "anthropic/claude-3.5-haiku":         { input: 0.8, output: 4 },
-  "google/gemini-3.1-flash-lite-preview": { input: 0.075, output: 0.3 },
-  "openai/gpt-4o-mini":                 { input: 0.15, output: 0.6 },
+  "google/gemini-3.1-flash-lite-preview": { input: 0.25, output: 1.5 },
+  "openai/gpt-5-mini":                  { input: 0.25, output: 2 },
 };
 
 interface TokenUsage {
@@ -462,7 +472,7 @@ function detectAddressedModels(text: string, threadModels: string[]): string[] {
   const lower = text.toLowerCase();
   const nameMap: Record<string, string | null> = {
     claude: "claude", gemini: "gemini", gpt: "gpt5", gpt5: "gpt5",
-    o3: "o3", deepseek: "deepseek",
+    o3: "o3", deepseek: "deepseek", grok: "grok",
     all: null, everyone: null, "you all": null,
   };
 
