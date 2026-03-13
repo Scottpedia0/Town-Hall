@@ -33,7 +33,8 @@ import {
   Briefcase,
   ExternalLink,
   Link,
-  Server
+  Server,
+  RefreshCw
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -482,6 +483,18 @@ export default function App() {
     } catch (err) {
       console.error('Failed to send human message', err);
     }
+  };
+
+  // Detect if a thread died mid-stream and can be resumed
+  const threadIsStalled = activeThreadId && messages.length > 0 && !recap && !isLoading && phase === 'idle';
+
+  // Resume a stalled/failed thread — re-runs analysis from where it left off
+  const handleResume = () => {
+    if (!activeThreadId) return;
+    // Find any human answers from the clarification phase
+    const humanMsgs = messages.filter(m => m.role === 'human' && m.done);
+    const lastAnswer = humanMsgs.length > 0 ? humanMsgs[humanMsgs.length - 1].text : '';
+    handleClarify(lastAnswer || undefined);
   };
 
   // Handle clarifying question answers (or skip)
@@ -1429,6 +1442,41 @@ export default function App() {
                   Interrupt
                   <Tip text="Stops the discussion. You'll see partial results and can ask follow-up questions." />
                 </button>
+              </div>
+            )}
+            {/* Resume button — shown when a thread died mid-stream */}
+            {threadIsStalled && (
+              <div className="mb-3 p-4 rounded-xl border border-orange-500/30 bg-orange-500/5">
+                <div className="flex items-center gap-2 mb-2">
+                  <AlertTriangle className="w-4 h-4 text-orange-400" />
+                  <span className="text-sm font-medium text-orange-300">This session appears to have stalled or timed out</span>
+                </div>
+                <p className="text-xs text-white/50 mb-3">The analysis didn't finish — this can happen if the server timed out or the connection dropped. You can resume from where it left off.</p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={handleResume}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-orange-500/20 border border-orange-500/40 text-orange-300 hover:bg-orange-500/30 transition-all text-sm font-medium"
+                  >
+                    <Zap className="w-3.5 h-3.5" />
+                    Resume Analysis
+                  </button>
+                  <button
+                    onClick={() => {
+                      const activeThread = threads.find(t => t.id === activeThreadId);
+                      if (activeThread) {
+                        setInputText(activeThread.topic);
+                        setActiveThreadId(null);
+                        setMessages([]);
+                        setRecap(null);
+                        setPhase('idle');
+                      }
+                    }}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 border border-white/10 text-white/50 hover:bg-white/10 hover:text-white/70 transition-all text-sm"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                    Start Over
+                  </button>
+                </div>
               </div>
             )}
             {/* Clarification answer prompt — shown after Round 0, survives refresh */}
