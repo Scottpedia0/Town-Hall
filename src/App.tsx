@@ -324,7 +324,7 @@ export default function App() {
     if (!inputText.trim()) return;
     const topic = inputText.trim();
     setIsLoading(true);
-    setMessages([]);
+    setMessages([{ thread_id: '', role: 'human' as const, text: topic, done: true }]);
     setRecap(null);
     recapReceivedRef.current = false;
     setIsTranscriptExpanded(true);
