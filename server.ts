@@ -1,6 +1,7 @@
 import express from "express";
 import path from "path";
 import dotenv from "dotenv";
+import { put, list, head, del } from "@vercel/blob";
 
 dotenv.config();
 
@@ -1005,10 +1006,77 @@ app.post("/human", async (req, res) => {
   }
 });
 
-app.post("/save/:threadId", (req, res) => {
-  const thread = threads.get(req.params.threadId);
-  if (thread) thread.status = "saved";
-  res.json({ success: true });
+// ── Persist thread to Vercel Blob ──
+app.post("/save/:threadId", async (req, res) => {
+  const tid = req.params.threadId;
+
+  // Accept thread data from the frontend (since serverless may not have it in memory)
+  const threadData = req.body.thread || threads.get(tid);
+  const messages = req.body.messages || threadData?.messages || [];
+  const recap = req.body.recap || threadData?.recap || "";
+
+  if (!threadData && !req.body.thread) {
+    return res.status(404).json({ error: "Thread not found and no data provided" });
+  }
+
+  try {
+    const payload = {
+      thread: threadData,
+      messages,
+      recap,
+      savedAt: new Date().toISOString(),
+    };
+
+    const blob = await put(`council/threads/${tid}.json`, JSON.stringify(payload), {
+      access: "public",
+      contentType: "application/json",
+      addRandomSuffix: false,
+    });
+
+    // Also update in-memory if we have it
+    const memThread = threads.get(tid);
+    if (memThread) memThread.status = "saved";
+
+    console.log(`[Blob] Saved thread ${tid} → ${blob.url}`);
+    res.json({ success: true, url: blob.url });
+  } catch (err: any) {
+    console.error(`[Blob] Save error for ${tid}:`, err);
+    res.status(500).json({ error: `Failed to save: ${err.message}` });
+  }
+});
+
+// ── Load thread from Vercel Blob ──
+app.get("/load/:threadId", async (req, res) => {
+  const tid = req.params.threadId;
+  try {
+    const { blobs } = await list({ prefix: `council/threads/${tid}.json` });
+    if (!blobs.length) {
+      return res.status(404).json({ error: "Thread not found in cloud storage" });
+    }
+    const response = await fetch(blobs[0].url);
+    const data = await response.json();
+    res.json(data);
+  } catch (err: any) {
+    console.error(`[Blob] Load error for ${tid}:`, err);
+    res.status(500).json({ error: `Failed to load: ${err.message}` });
+  }
+});
+
+// ── List all saved threads from Vercel Blob ──
+app.get("/saved-threads", async (_req, res) => {
+  try {
+    const { blobs } = await list({ prefix: "council/threads/" });
+    const threads = blobs.map(b => ({
+      id: b.pathname.replace("council/threads/", "").replace(".json", ""),
+      url: b.url,
+      size: b.size,
+      uploadedAt: b.uploadedAt,
+    }));
+    res.json({ threads });
+  } catch (err: any) {
+    console.error("[Blob] List error:", err);
+    res.status(500).json({ error: `Failed to list: ${err.message}` });
+  }
 });
 
 // Global SSE endpoint — frontend connects here

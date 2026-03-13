@@ -220,6 +220,34 @@ export default function App() {
     }
   };
 
+  // Auto-save completed session to cloud (Vercel Blob)
+  const saveToCloud = async (threadId: string) => {
+    try {
+      const currentMessages = messagesRef.current;
+      const threadList = JSON.parse(localStorage.getItem('council_threads') || '[]');
+      const thread = threadList.find((t: any) => t.id === threadId);
+      const savedRecap = localStorage.getItem(`council_recap_${threadId}`);
+
+      const res = await fetch(`/save/${threadId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          thread: thread || { id: threadId, status: 'complete' },
+          messages: currentMessages,
+          recap: savedRecap || '',
+        }),
+      });
+      const result = await res.json();
+      if (result.success) {
+        console.log(`[Cloud] Saved thread ${threadId} → ${result.url}`);
+      } else {
+        console.warn(`[Cloud] Save failed:`, result.error);
+      }
+    } catch (err) {
+      console.warn('[Cloud] Auto-save failed:', err);
+    }
+  };
+
   // Process an SSE data event from the stream
   const processSSEData = (data: any) => {
     if (data.ping) return;
@@ -274,6 +302,10 @@ export default function App() {
       if (data.estimatedCost !== undefined) setEstimatedCost(data.estimatedCost);
       if (data.agentPayload !== undefined) setAgentPayload(data.agentPayload);
       setIsTranscriptExpanded(false);
+      // Auto-save to cloud on completion
+      if (data.threadId || activeThreadId) {
+        setTimeout(() => saveToCloud(data.threadId || activeThreadId!), 1000);
+      }
       return;
     }
 

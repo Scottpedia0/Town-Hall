@@ -18,6 +18,8 @@
     { "source": "/thread/(.*)", "destination": "/api" },
     { "source": "/threads", "destination": "/api" },
     { "source": "/followup", "destination": "/api" },
-    { "source": "/synthesize", "destination": "/api" }
+    { "source": "/synthesize", "destination": "/api" },
+    { "source": "/load/(.*)", "destination": "/api" },
+    { "source": "/saved-threads", "destination": "/api" }
   ]
 }
