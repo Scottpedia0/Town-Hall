@@ -10,9 +10,13 @@
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api" },
     { "source": "/start", "destination": "/api" },
+    { "source": "/clarify", "destination": "/api" },
+    { "source": "/human", "destination": "/api" },
+    { "source": "/save/(.*)", "destination": "/api" },
     { "source": "/events", "destination": "/api" },
     { "source": "/stream/(.*)", "destination": "/api" },
     { "source": "/thread/(.*)", "destination": "/api" },
+    { "source": "/threads", "destination": "/api" },
     { "source": "/followup", "destination": "/api" }
   ]
 }

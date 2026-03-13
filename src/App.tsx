@@ -325,6 +325,7 @@ export default function App() {
         tier, stakes, reversible, confidenceThreshold, synthesisStrategy,
         template: selectedTemplate,
         templateContent: templateContents[selectedTemplate],
+        systemContext: businessContext || undefined, // Wire businessContext → systemContext for server
         businessContext, isRagConnected,
       };
 
@@ -438,13 +439,19 @@ export default function App() {
     }
 
     try {
+      // Send topic + recent messages for serverless reconstruction
+      const activeThread = threads.find(t => t.id === activeThreadId);
+      const recentMsgs = messages.filter(m => m.done && m.text && m.text.length > 10).slice(-20);
       const res = await fetch('/human', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           thread_id: activeThreadId,
+          topic: activeThread?.topic || '',
           text,
           models: modelsToAddress,
+          systemContext: businessContext || undefined,
+          previousMessages: recentMsgs,
           tier
         }),
       });
@@ -476,11 +483,16 @@ export default function App() {
     abortRef.current = abort;
 
     try {
+      // Send full context — serverless can't remember the thread from /start
+      const activeThread = threads.find(t => t.id === activeThreadId);
       const res = await fetch('/clarify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           thread_id: activeThreadId,
+          topic: activeThread?.topic || '',
+          models: Array.from(selectedModels).map(m => MODELS[m].id),
+          systemContext: businessContext || undefined,
           answers: answers || '',
         }),
         signal: abort.signal,
@@ -914,28 +926,21 @@ export default function App() {
 
                   <div className="space-y-4 p-6 rounded-2xl border border-white/10 bg-white/[0.02] flex flex-col">
                     <div className="flex items-center justify-between">
-                      <label className="text-sm font-bold">Business Context & RAG</label>
-                      <button
-                        onClick={() => {
-                          setIsRagConnected(false);
-                          alert('🚧 Connect Context (RAG) is coming in the next version! This will let you connect repos, docs, and data sources directly to your council discussions.');
-                        }}
-                        className="text-[10px] uppercase tracking-widest font-bold px-2 py-1 rounded-md flex items-center gap-1 transition-colors border bg-white/5 text-white/40 border-white/10 hover:bg-white/10 hover:text-white"
-                      >
-                        <Database className="w-3 h-3" />
-                        Connect Context
-                        <span className="ml-1 text-[8px] bg-amber-500/20 text-amber-400 px-1 rounded">SOON</span>
-                      </button>
+                      <label className="text-sm font-bold">Context for the Council</label>
                     </div>
                     <p className="text-xs text-white/40 leading-relaxed">
-                      Inject additional business context, links to repos, or specific constraints.
+                      Paste architecture docs, repo details, constraints, or any background the models should know.
+                      This gets injected into every model's prompt — more context = better recommendations.
                     </p>
                     <textarea
                       value={businessContext}
                       onChange={(e) => setBusinessContext(e.target.value)}
-                      placeholder="e.g. 'We are using React 18 and Tailwind. The main repo is at github.com/org/repo...'"
-                      className="w-full flex-1 min-h-[80px] bg-black/40 border border-[#262626] rounded-xl p-3 text-xs text-white/80 focus:outline-none focus:border-blue-500/50 transition-colors resize-none custom-scrollbar"
+                      placeholder={"Paste context here — architecture docs, tech stack, constraints, business situation...\n\nExample:\n- We're a 2-person startup, pre-revenue\n- Stack: React 18, Node, Postgres on Railway\n- Main repo: github.com/org/repo\n- Key constraint: $500/mo infrastructure budget"}
+                      className="w-full flex-1 min-h-[140px] bg-black/40 border border-[#262626] rounded-xl p-3 text-xs text-white/80 focus:outline-none focus:border-blue-500/50 transition-colors resize-y custom-scrollbar font-mono"
                     />
+                    <div className="text-[10px] text-white/20 font-mono">
+                      {businessContext.length > 0 ? `${businessContext.length} chars` : 'No context provided — models will work with the question alone'}
+                    </div>
                   </div>
                 </div>
               </div>

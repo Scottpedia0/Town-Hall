@@ -688,14 +688,24 @@ app.post("/start", async (req, res) => {
 });
 
 // ── Resume after clarifying questions answered (or skipped) ──
+// Serverless-safe: frontend sends full context since threads don't persist across invocations
 app.post("/clarify", async (req, res) => {
   const tid = req.body.thread_id;
   const answers = req.body.answers?.trim(); // Optional — empty = skip
+  const topic = req.body.topic?.trim();
+  const models = req.body.models || ["claude", "gemini", "gpt5", "deepseek"];
+  const systemContext = req.body.systemContext?.trim();
 
-  const thread = threads.get(tid);
-  if (!thread) return res.status(404).json({ error: "Thread not found" });
-  if (thread.status !== "awaiting_clarification") {
-    return res.status(400).json({ error: "Thread is not awaiting clarification" });
+  if (!tid || !topic) return res.status(400).json({ error: "Missing thread_id or topic" });
+
+  // Reconstruct thread if it doesn't exist (serverless: different invocation)
+  let thread = threads.get(tid);
+  if (!thread) {
+    thread = {
+      id: tid, topic, status: "awaiting_clarification", created: new Date().toISOString(),
+      models, messages: [], systemContext, totalCost: 0,
+    };
+    threads.set(tid, thread);
   }
 
   // Store answers for context injection
@@ -712,7 +722,7 @@ app.post("/clarify", async (req, res) => {
 
   inlineStreamTarget = res;
   try {
-    await runAnalysisRounds(tid, thread.topic, thread.models);
+    await runAnalysisRounds(tid, topic, models);
   } catch (err: any) {
     console.error("Clarify resume error:", err);
     addMessage(tid, { type: "status", phase: "error", text: `Resume error: ${err.message}` });
@@ -780,10 +790,22 @@ app.get("/threads", (req, res) => {
 app.post("/human", async (req, res) => {
   const tid = req.body.thread_id;
   const text = req.body.text?.trim();
+  const topic = req.body.topic?.trim(); // Frontend sends topic for serverless reconstruction
   if (!text) return res.status(400).json({ error: "Empty" });
 
-  const thread = threads.get(tid);
-  if (!thread) return res.status(404).json({ error: "Thread not found" });
+  // Reconstruct thread if needed (serverless: different invocation)
+  let thread = threads.get(tid);
+  if (!thread && topic) {
+    thread = {
+      id: tid, topic, status: "complete", created: new Date().toISOString(),
+      models: req.body.models || ["claude", "gemini", "gpt5", "deepseek"],
+      messages: req.body.previousMessages || [],
+      systemContext: req.body.systemContext,
+      totalCost: 0,
+    };
+    threads.set(tid, thread);
+  }
+  if (!thread) return res.status(404).json({ error: "Thread not found — include topic for serverless" });
 
   // Stream SSE for follow-ups too
   res.setHeader("Content-Type", "text/event-stream");
