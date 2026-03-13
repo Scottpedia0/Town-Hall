@@ -252,7 +252,7 @@ async function callGoogle(modelId: string, prompt: string, system: string): Prom
   return { text, usage: { promptTokens, completionTokens, cost } };
 }
 
-async function callModel(key: string, prompt: string, systemOverride?: string, timeoutMs = 90_000): Promise<ModelResponse> {
+async function callModel(key: string, prompt: string, systemOverride?: string, timeoutMs = 240_000): Promise<ModelResponse> {
   const cfg = MODELS[key];
   if (!cfg) throw new Error(`Unknown model: ${key}`);
   const system = systemOverride || BASE_SYSTEM_PROMPT;
@@ -509,11 +509,11 @@ say so and explain why their counterarguments don't hold up.`;
   const anonymizedR1 = validR1.map((r, i) => `**${anonymousLabels[i] || `Model ${i+1}`} (Round 1):** ${r.text}`).join("\n\n");
   const anonymizedR2 = round2Results.map((r, i) => `**${anonymousLabels[i] || `Model ${i+1}`} (Round 2):** ${r.text}`).join("\n\n");
 
-  // Only run the BS detector if we have enough models AND enough time budget remaining.
-  // Vercel has a 300s limit — we need ~60s for synthesis, so skip BS if >220s elapsed.
+  // Only run the BS detector if we have enough models and reasonable time remaining.
+  // Vercel has a 300s limit — only skip BS if we're really close to the wall.
   let bsDetectorText = "";
   const elapsedSoFar = (Date.now() - startTime) / 1000;
-  const timeBudgetOk = elapsedSoFar < 220;
+  const timeBudgetOk = elapsedSoFar < 260;
 
   if (round2Results.length >= 2 && timeBudgetOk) {
     addMessage(threadId, {
@@ -535,8 +535,8 @@ ${anonymizedR2}
 ${BULLSHIT_DETECTOR_PROMPT}`;
 
     try {
-      // Give BS detector max 45s — leave time for synthesis
-      const bsTimeoutMs = Math.min(45_000, Math.max(15_000, (270 - elapsedSoFar) * 1000));
+      // Use remaining time minus a small buffer for synthesis
+      const bsTimeoutMs = Math.max(30_000, (290 - elapsedSoFar) * 1000);
       const bsResponse = await callModel(bsDetectorKey, bsPrompt, BULLSHIT_DETECTOR_PROMPT, bsTimeoutMs);
       bsDetectorText = bsResponse.text;
       trackCost(bsResponse.usage);
