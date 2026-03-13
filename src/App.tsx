@@ -431,9 +431,20 @@ export default function App() {
       }
     } finally {
       setIsLoading(false);
-      // If stream ended without a recap (timeout/crash), reset phase so stall detection shows Resume button
+      // If stream ended without a recap event but synthesis IS in the messages, promote it to recap
       if (!recapReceivedRef.current) {
-        setPhase('idle');
+        setMessages(prev => {
+          const synthMsg = [...prev].reverse().find(m => (m as any).synthesis === true);
+          if (synthMsg?.text && synthMsg.text.length > 100) {
+            // We got the synthesis but the recap event was lost (Vercel timeout)
+            recapReceivedRef.current = true;
+            setRecap(synthMsg.text);
+            setPhase('idle');
+            return prev;
+          }
+          setPhase('idle');
+          return prev;
+        });
       }
     }
   };
@@ -560,7 +571,18 @@ export default function App() {
     } finally {
       setIsLoading(false);
       if (!recapReceivedRef.current) {
-        setPhase('idle'); // Trigger stall detection → Resume button
+        // Check if synthesis arrived but recap event was lost (Vercel timeout)
+        setMessages(prev => {
+          const synthMsg = [...prev].reverse().find(m => (m as any).synthesis === true);
+          if (synthMsg?.text && synthMsg.text.length > 100) {
+            recapReceivedRef.current = true;
+            setRecap(synthMsg.text);
+            setPhase('idle');
+            return prev;
+          }
+          setPhase('idle');
+          return prev;
+        });
       }
     }
   };
