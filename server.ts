@@ -24,7 +24,6 @@ function requireApiKey(req: express.Request, res: express.Response, next: expres
 interface ModelConfig {
   name: string;
   color: string;
-  role: string;
   provider: "openrouter" | "google";
   modelId: string;
   tier: "frontier" | "strong";
@@ -32,38 +31,68 @@ interface ModelConfig {
 
 const MODELS: Record<string, ModelConfig> = {
   // Frontier tier — best-in-class reasoning
-  claude:   { name: "Claude Opus 4.6",  color: "#5b9bf5", role: "Architect",      provider: "openrouter", modelId: "anthropic/claude-opus-4.6",          tier: "frontier" },
-  gpt5:     { name: "GPT-5.4",          color: "#a78bfa", role: "Challenger",     provider: "openrouter", modelId: "openai/gpt-5.4",                     tier: "frontier" },
-  grok:     { name: "Grok 4",           color: "#1d9bf0", role: "Contrarian",     provider: "openrouter", modelId: "x-ai/grok-4",                        tier: "frontier" },
+  claude:   { name: "Claude Opus 4.6",  color: "#5b9bf5", provider: "openrouter", modelId: "anthropic/claude-opus-4.6",          tier: "frontier" },
+  gpt5:     { name: "GPT-5.4",          color: "#a78bfa", provider: "openrouter", modelId: "openai/gpt-5.4",                     tier: "frontier" },
+  grok:     { name: "Grok 4",           color: "#1d9bf0", provider: "openrouter", modelId: "x-ai/grok-4",                        tier: "frontier" },
   // Strong tier — near-frontier, great value
-  gemini:   { name: "Gemini 3.1 Pro",   color: "#34d399", role: "Context Keeper", provider: "openrouter", modelId: "google/gemini-3.1-pro-preview",       tier: "strong" },
-  deepseek: { name: "DeepSeek V3.2",    color: "#fb923c", role: "Logic Checker",  provider: "openrouter", modelId: "deepseek/deepseek-v3.2",             tier: "strong" },
+  gemini:   { name: "Gemini 3.1 Pro",   color: "#34d399", provider: "openrouter", modelId: "google/gemini-3.1-pro-preview",       tier: "strong" },
+  deepseek: { name: "DeepSeek V3.2",    color: "#fb923c", provider: "openrouter", modelId: "deepseek/deepseek-v3.2",             tier: "strong" },
 };
 
-// Role-specific system prompts
-const SYSTEM_PROMPTS: Record<string, string> = {
-  claude: `You are the Architect in a multi-AI decision council for a startup founder (Scott, CEO of Cowork.ai — an AI agent for remote workers).
-Your job: get to the RIGHT answer. Focus on what's technically true, what's proven, what the real constraints are.
-Separate facts from assumptions. Give concrete specifics. Think deeply.`,
+// ─── BASE SYSTEM PROMPT ───
+// No roles. No characters. No biases. Every model gets this identical prompt.
+// The value comes from model diversity (different training, different strengths),
+// NOT from forcing models into personas.
+// Research: Role-playing "significantly underperforms almost any other baseline" (ICLR 2025)
+const BASE_SYSTEM_PROMPT = `You are one of several AI models being asked this question simultaneously.
+Each model will answer independently, then review each other's work.
 
-  gemini: `You are the Context Keeper in a multi-AI decision council for a startup founder (Scott, CEO of Cowork.ai).
-Your job: connect dots others miss. Check what's already been decided, what specs say, what conflicts with existing work.
-Bring receipts — reference specific docs, previous discussions. Flag contradictions.`,
+RULES:
+- Give your honest, complete analysis. Do not hedge to seem balanced.
+- If you are confident, say so and say why. If uncertain, say where and why.
+- Stand your ground. If other models disagree with you later, do NOT change your position
+  just because of social pressure. Only update if they present NEW evidence or logic you missed.
+- State your assumptions explicitly. If you're guessing about context, say so.
+- End with a confidence score (0-100) and what single thing would most change your answer.
+- The user is making real decisions, sometimes with real consequences. Get it right.
 
-  gpt5: `You are the Challenger in a multi-AI decision council for a startup founder (Scott, CEO of Cowork.ai).
-Your job: pressure-test every claim. Is this actually true or just conventional wisdom? What's the simplest version that works?
-Only push back when genuinely wrong.`,
+This is NOT a roleplay. You are not playing a character. You are an intelligence being consulted.
+Think as deeply as you need to. There is no length limit.`;
 
-  deepseek: `You are the Logic Checker in a multi-AI decision council for a startup founder (Scott, CEO of Cowork.ai).
-Your job: verify everyone's reasoning. Does the conclusion follow from the premises? Hidden assumptions?
-Rate confidence levels. Identify what would change the answer.`,
+// ─── STRUCTURAL MECHANISMS ───
+// These are NOT roles — they're structural interventions applied to the process,
+// not to individual model identities. Inspired by Du et al. 2023, Liang et al. 2023.
 
-  grok: `You are the Contrarian in a multi-AI decision council for a startup founder (Scott, CEO of Cowork.ai).
-Your job: challenge conventional wisdom. What is everyone else missing? What's the unconventional take that might actually be right?
-Be provocatively honest — if the consensus is wrong, say so. But back it up with reasoning, not just contrarianism.`,
-};
+const BULLSHIT_DETECTOR_PROMPT = `You are reviewing the analyses below from multiple AI models.
+Your ONLY job: find where they're wrong, lazy, or agreeing too easily.
 
-const DEFAULT_SYSTEM = "You are an AI analyst in a decision council. Get to the right answer. Be thorough.";
+DO NOT add your own analysis of the original question.
+DO NOT be contrarian for the sake of it.
+
+Instead:
+1. If all models agree, ask: is there a plausible scenario where they're ALL wrong? What are they all assuming?
+2. If confidence scores are suspiciously high, challenge them. What evidence would they need to justify that confidence?
+3. If any model changed its position between rounds, was it because of new logic or because of social pressure?
+4. Call out any vague language, hedging, or "on the other hand" cop-outs.
+
+Be specific. Quote the exact claim you're challenging. This is quality control, not participation.`;
+
+const SYNTHESIS_PROMPT_TEMPLATE = `You are synthesizing a multi-model discussion into a clear recommendation.
+You did NOT participate in the discussion. You are reading it fresh.
+
+Your job is to extract the ANSWER, not summarize the debate.
+
+1. **What we know for sure** — Facts all models confirmed with evidence.
+2. **Best path** — The highest-probability correct answer, with reasoning.
+3. **Key risk** — The one thing most likely to make this wrong.
+4. **Where they disagreed** — And who had the stronger argument, with why.
+5. **Confidence** — 0-100 score, with what would change it.
+6. **Gridlock check** — If models fundamentally disagree and neither side has a knockout argument,
+   say so honestly. "The models could not resolve this — here are the two viable paths and the tradeoffs."
+   Do NOT force consensus where there isn't one.
+7. **Next actions** — Specific, actionable steps.
+
+Give the answer. Not a balanced summary. Not a debate recap. The answer.`;
 
 // --- Cost tracking ---
 // OpenRouter pricing per 1M tokens (approximate, updated March 2026)
@@ -217,7 +246,7 @@ async function callGoogle(modelId: string, prompt: string, system: string): Prom
 async function callModel(key: string, prompt: string, systemOverride?: string): Promise<ModelResponse> {
   const cfg = MODELS[key];
   if (!cfg) throw new Error(`Unknown model: ${key}`);
-  const system = systemOverride || SYSTEM_PROMPTS[key] || DEFAULT_SYSTEM;
+  const system = systemOverride || BASE_SYSTEM_PROMPT;
   return cfg.provider === "google"
     ? callGoogle(cfg.modelId, prompt, system)
     : callOpenRouter(cfg.modelId, prompt, system);
@@ -341,10 +370,10 @@ Get to the answer. No filler. Think as deeply as needed.`;
     return;
   }
 
-  // ── ROUND 2: Parallel pressure-test and converge ──
+  // ── ROUND 2: Cross-examination — models review each other's work ──
   addMessage(threadId, {
     type: "status", phase: "targeted_debate",
-    text: "Round 2 — Models pressure-testing each other's analyses.",
+    text: "Round 2 — Models reviewing each other's analyses.",
   });
 
   const allPositions = validR1.map(r => `**${r.name}:** ${r.text}`).join("\n\n");
@@ -356,20 +385,24 @@ Get to the answer. No filler. Think as deeply as needed.`;
 
     addMessage(threadId, { type: "message", role: "model", name: key, text: "Reviewing...", done: false });
 
-    const prompt = `The founder asked: ${topic}${fullContextPrefix}
-All Round 1 analyses:
+    const prompt = `The user asked: ${topic}${fullContextPrefix}
+
+All Round 1 analyses from different models:
 ${allPositions}
 
-${ownR1 ? `Your Round 1 analysis: ${ownR1.text}` : ""}
+${ownR1 ? `Your Round 1 analysis was: ${ownR1.text}` : ""}
 
-Now that you've seen everyone's analysis:
-1. Where did someone else get it MORE right than you? Update your view.
-2. Where is someone factually wrong? Cite the specific error.
-3. What's the strongest path forward considering ALL analyses?
-4. What are we still uncertain about?
-5. Confidence now (low/medium/high)?
+Review the other models' analyses:
+1. Where did another model identify something you missed? Acknowledge it specifically.
+2. Where is another model factually wrong or reasoning poorly? Cite the exact claim and explain why.
+3. Did any model make assumptions that could be wrong? Which ones?
+4. Has seeing their analyses changed YOUR answer? If so, explain what NEW information or logic changed your mind.
+   If NOT, explain why you're standing firm despite their arguments.
+5. Updated confidence score (0-100) and what would change your answer.
 
-Converge on the RIGHT answer, not defend your original take.`;
+IMPORTANT: Do NOT change your position just because other models disagree. Only update if you see
+NEW evidence, logic, or a flaw in your own reasoning that you missed. If you still think you're right,
+say so and explain why their counterarguments don't hold up.`;
 
     try {
       const response = await callModel(key, prompt);
@@ -383,59 +416,104 @@ Converge on the RIGHT answer, not defend your original take.`;
 
   await Promise.all(round2Promises);
 
-  // ── ROUND 3: Synthesis and Recommendation ──
-  // Use the best-tier model from the selected models for synthesis
-  const tierPriority = ["best", "fast", "light"];
-  const synthModelKey = models.sort((a, b) => {
-    const aTier = tierPriority.indexOf(MODELS[a]?.tier || "light");
-    const bTier = tierPriority.indexOf(MODELS[b]?.tier || "light");
+  // ── ROUND 2.5: Bullshit Detector ──
+  // A separate structural pass — NOT a role, NOT a participant.
+  // Uses the highest-tier model to check for groupthink, lazy agreement, or weak reasoning.
+  const tierPriority = ["frontier", "strong"];
+  const bsDetectorKey = [...models].sort((a, b) => {
+    const aTier = tierPriority.indexOf(MODELS[a]?.tier || "strong");
+    const bTier = tierPriority.indexOf(MODELS[b]?.tier || "strong");
     return aTier - bTier;
-  })[0] || "gemini";
-
-  addMessage(threadId, {
-    type: "status", phase: "synthesizing",
-    text: `Round 3 — ${MODELS[synthModelKey]?.name || synthModelKey} synthesizing recommendation.`,
-  });
+  })[0] || "claude";
 
   const allR2 = round2Results.map(r => `**${r.name} (Round 2):** ${r.text}`).join("\n\n");
 
-  const synthPrompt = `The founder asked: ${topic}
+  // Only run the BS detector if we have enough models for it to be meaningful
+  let bsDetectorText = "";
+  if (round2Results.length >= 2) {
+    addMessage(threadId, {
+      type: "status", phase: "quality_check",
+      text: "Quality check — Scanning for groupthink, weak reasoning, or lazy agreement.",
+    });
 
-Round 1 (initial analyses):
+    addMessage(threadId, { type: "message", role: "model", name: "bs-detector", text: "Checking...", done: false });
+
+    const bsPrompt = `The user asked: ${topic}
+
+Round 1 (independent analyses):
 ${allPositions}
 
-Round 2 (pressure-tested):
+Round 2 (after cross-examination):
 ${allR2}
 
-Synthesize into a clear recommendation:
+${BULLSHIT_DETECTOR_PROMPT}`;
 
-1. **What we know for sure** — Facts all models confirmed.
-2. **Best path** — The highest-probability correct answer, with full reasoning.
-3. **Key risk** — The one thing most likely to make this wrong.
-4. **Confidence** — VERY HIGH / HIGH / MEDIUM / LOW
-5. **Autonomy classification:** AUTO-PROCEED / NOTIFY-HUMAN / HUMAN-REQUIRED
-6. **Next actions** — Specific, actionable steps.
+    try {
+      const bsResponse = await callModel(bsDetectorKey, bsPrompt, BULLSHIT_DETECTOR_PROMPT);
+      bsDetectorText = bsResponse.text;
+      trackCost(bsResponse.usage);
+      addMessage(threadId, { type: "message", role: "model", name: "bs-detector", text: bsDetectorText, done: true, phase: "quality_check" });
+    } catch (err: any) {
+      addMessage(threadId, { type: "message", role: "model", name: "bs-detector", text: `[Quality check error: ${err.message}]`, done: true });
+    }
+  }
 
-This is a decision tool, not a debate summary. Give the founder the answer.`;
+  // ── ROUND 3: Synthesis and Recommendation ──
+  // Uses a different model than the BS detector when possible, for independence.
+  // The synthesizer is NOT a participant — it reads the discussion fresh.
+  const synthCandidates = [...models].sort((a, b) => {
+    const aTier = tierPriority.indexOf(MODELS[a]?.tier || "strong");
+    const bTier = tierPriority.indexOf(MODELS[b]?.tier || "strong");
+    return aTier - bTier;
+  });
+  // Pick a different model than the BS detector if we can
+  const synthModelKey = synthCandidates.find(k => k !== bsDetectorKey) || synthCandidates[0] || "gpt5";
 
-  const synthSystem = `You are the Council Moderator. Give the founder the RIGHT answer, not a balanced summary. Be honest about confidence.`;
+  addMessage(threadId, {
+    type: "status", phase: "synthesizing",
+    text: `Synthesis — ${MODELS[synthModelKey]?.name || synthModelKey} extracting the recommendation.`,
+  });
+
+  const synthPrompt = `The user asked: ${topic}
+
+Round 1 (independent analyses):
+${allPositions}
+
+Round 2 (cross-examination):
+${allR2}
+
+${bsDetectorText ? `Quality Check (bullshit detector):\n${bsDetectorText}\n` : ""}
+
+${SYNTHESIS_PROMPT_TEMPLATE}`;
 
   let synthesisText = "";
   let confidence = 75;
   let consensusType: "unanimous" | "additive" | "divergent" = "additive";
 
   try {
-    const response = await callModel(synthModelKey, synthPrompt, synthSystem);
+    const response = await callModel(synthModelKey, synthPrompt, SYNTHESIS_PROMPT_TEMPLATE);
     synthesisText = response.text;
     trackCost(response.usage);
 
-    if (synthesisText.includes("VERY HIGH")) confidence = 95;
-    else if (synthesisText.includes("HIGH")) confidence = 85;
-    else if (synthesisText.includes("MEDIUM")) confidence = 65;
-    else if (synthesisText.includes("LOW")) confidence = 40;
+    // Extract confidence from 0-100 score
+    const confMatch = synthesisText.match(/\b(\d{1,3})(?:\/100|%|\s*(?:out of|\/)\s*100)\b/);
+    if (confMatch) {
+      confidence = Math.min(100, Math.max(0, parseInt(confMatch[1])));
+    } else if (synthesisText.toLowerCase().includes("gridlock") || synthesisText.toLowerCase().includes("could not resolve")) {
+      confidence = 35;
+      consensusType = "divergent";
+    } else if (synthesisText.includes("VERY HIGH") || /\b9[0-9]\b/.test(synthesisText)) {
+      confidence = 92;
+    } else if (synthesisText.includes("HIGH") || /\b8[0-9]\b/.test(synthesisText)) {
+      confidence = 82;
+    } else if (synthesisText.includes("MEDIUM") || /\b[56][0-9]\b/.test(synthesisText)) {
+      confidence = 62;
+    } else if (synthesisText.includes("LOW") || /\b[34][0-9]\b/.test(synthesisText)) {
+      confidence = 40;
+    }
 
-    if (synthesisText.toLowerCase().includes("unanimous")) consensusType = "unanimous";
-    else if (synthesisText.toLowerCase().includes("divergent")) consensusType = "divergent";
+    if (synthesisText.toLowerCase().includes("unanimous") || synthesisText.toLowerCase().includes("all models agree")) consensusType = "unanimous";
+    else if (synthesisText.toLowerCase().includes("divergent") || synthesisText.toLowerCase().includes("gridlock") || synthesisText.toLowerCase().includes("could not resolve")) consensusType = "divergent";
 
     addMessage(threadId, { type: "message", role: "model", name: "moderator", text: synthesisText, done: true, synthesis: true });
   } catch (err: any) {
@@ -488,9 +566,10 @@ async function handleFollowup(threadId: string, humanText: string, modelKeys?: s
 Recent conversation:
 ${recentMessages}
 
-The founder just said: "${humanText}"
+The user just said: "${humanText}"
 
-Respond directly as ${cfg.name}, the ${cfg.role}.`;
+Respond directly. If you made a previous argument in this discussion, maintain consistency with it
+unless the user's new input gives you genuine reason to update.`;
 
     try {
       const response = await callModel(key, prompt);
@@ -504,8 +583,8 @@ Respond directly as ${cfg.name}, the ${cfg.role}.`;
 function detectAddressedModels(text: string, threadModels: string[]): string[] {
   const lower = text.toLowerCase();
   const nameMap: Record<string, string | null> = {
-    claude: "claude", gemini: "gemini", gpt: "gpt5", gpt5: "gpt5",
-    o3: "o3", deepseek: "deepseek", grok: "grok",
+    claude: "claude", opus: "claude", gemini: "gemini", gpt: "gpt5", gpt5: "gpt5",
+    deepseek: "deepseek", grok: "grok",
     all: null, everyone: null, "you all": null,
   };
 

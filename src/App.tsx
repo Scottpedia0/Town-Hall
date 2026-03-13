@@ -1166,10 +1166,13 @@ export default function App() {
                         const modelInfo = msg.name
                           ? MODELS[msg.name as keyof typeof MODELS]
                             || Object.values(MODELS).find(m => m.id === msg.name)
-                            || (msg.name === 'moderator' ? { id: 'moderator', color: '#fbbf24', tier: 'frontier' as const, description: 'Council Moderator' } : null)
+                            || (msg.name === 'moderator' ? { id: 'moderator', color: '#fbbf24', tier: 'frontier' as const, description: 'Synthesis' } : null)
+                            || (msg.name === 'bs-detector' ? { id: 'bs-detector', color: '#f43f5e', tier: 'frontier' as const, description: 'Quality Check' } : null)
                           : null;
                         const modelDisplayName = msg.name
-                          ? Object.entries(MODELS).find(([, m]) => m.id === msg.name)?.[0] || msg.name
+                          ? (msg.name === 'bs-detector' ? '⚡ BS Detector' :
+                             msg.name === 'moderator' ? '📋 Synthesis' :
+                             Object.entries(MODELS).find(([, m]) => m.id === msg.name)?.[0] || msg.name)
                           : null;
 
                         return (
@@ -1213,7 +1216,12 @@ export default function App() {
                                       )}
                                       {msg.phase === 'targeted_debate' && (
                                         <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-500/80 border border-amber-500/20">
-                                          Rebuttal
+                                          Cross-exam
+                                        </span>
+                                      )}
+                                      {msg.phase === 'quality_check' && (
+                                        <span className="text-[9px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-500/80 border border-rose-500/20">
+                                          BS Check
                                         </span>
                                       )}
                                     </>
@@ -1445,26 +1453,45 @@ export default function App() {
             </div>
             
             <div className="p-6 space-y-8 text-sm text-white/80 leading-relaxed">
+              {/* What this IS */}
               <div className="space-y-4">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-emerald-500/80">What This Is</h3>
                 <p className="text-base">
-                  Cowork Council is a decision engine that uses multiple AI models to find the best answer through <strong>first-principle thinking</strong>. Instead of relying on one AI, we ask several to debate.
+                  A <strong>decision engine</strong> that consults multiple frontier AI models simultaneously. Each model gives its honest, unbiased analysis — then they cross-examine each other's work.
                 </p>
+                <p className="text-sm text-white/60">
+                  The value comes from <strong>genuine model diversity</strong> — Claude, GPT-5.4, Grok, Gemini, and DeepSeek are trained differently and genuinely think differently. That's the whole point. When models trained on different data, with different architectures, independently converge on the same answer — you can trust it.
+                </p>
+                <p className="text-xs text-white/40">
+                  Based on multi-agent debate research from MIT, Google DeepMind, and others. Studies show this approach reduces hallucinations by 30%+ and improves reasoning accuracy significantly over single-model approaches.
+                </p>
+              </div>
+
+              {/* What this IS NOT */}
+              <div className="space-y-4">
+                <h3 className="text-xs font-bold uppercase tracking-widest text-rose-500/80">What This Is NOT</h3>
+                <ul className="space-y-2 text-sm text-white/60">
+                  <li className="flex gap-2"><span className="text-rose-500">✕</span> <strong>Not roleplay.</strong> Models are not assigned characters or personas. No "Architect" or "Contrarian" — that constrains intelligence.</li>
+                  <li className="flex gap-2"><span className="text-rose-500">✕</span> <strong>Not a panel show.</strong> Research shows role-playing "significantly underperforms" unbiased models (ICLR 2025).</li>
+                  <li className="flex gap-2"><span className="text-rose-500">✕</span> <strong>Not forced consensus.</strong> If models genuinely disagree, the system reports gridlock honestly instead of manufacturing agreement.</li>
+                </ul>
               </div>
 
               <div className="space-y-4">
                 <h3 className="text-xs font-bold uppercase tracking-widest text-white/40">The Process</h3>
                 <ol className="space-y-4 list-decimal list-inside marker:text-blue-500 marker:font-bold">
-                  <li><strong>Clarifying Questions:</strong> A few models ask smart questions to understand your situation better before diving in.</li>
-                  <li><strong>Blind Draft:</strong> Each selected model answers your question independently, without seeing the others' answers.</li>
-                  <li><strong>Targeted Debate:</strong> The models review each other's drafts, point out flaws, and challenge assumptions.</li>
-                  <li><strong>Synthesis:</strong> A final step reviews the debate and extracts the recommended action, confidence score, and key caveats.</li>
+                  <li><strong>Clarifying Questions:</strong> Models ask smart questions to understand your situation before committing to analysis.</li>
+                  <li><strong>Independent Analysis:</strong> Each model answers your question independently — no model sees another's answer.</li>
+                  <li><strong>Cross-Examination:</strong> Models review each other's work. They must cite specific claims they're challenging. They're instructed to stand their ground unless presented with genuinely new logic.</li>
+                  <li><strong>Quality Check:</strong> A separate pass scans for groupthink, lazy agreement, suspiciously high confidence, or models caving to social pressure.</li>
+                  <li><strong>Synthesis:</strong> A different model (not the quality checker) reads everything fresh and extracts the answer. Reports gridlock honestly if models couldn't resolve their disagreement.</li>
                 </ol>
               </div>
 
               <div className="space-y-4">
-                <h3 className="text-xs font-bold uppercase tracking-widest text-white/40">Model Strengths</h3>
+                <h3 className="text-xs font-bold uppercase tracking-widest text-white/40">The Models</h3>
                 <p className="text-xs text-white/60 mb-2">
-                  We use <a href="https://openrouter.ai/rankings" target="_blank" rel="noreferrer" className="text-blue-400 hover:underline inline-flex items-center gap-1">OpenRouter <ExternalLink className="w-3 h-3" /></a> to access the best models. Here is what they are good at:
+                  All models via <a href="https://openrouter.ai/rankings" target="_blank" rel="noreferrer" className="text-blue-400 hover:underline inline-flex items-center gap-1">OpenRouter <ExternalLink className="w-3 h-3" /></a>. Every model gets the same unbiased prompt. No roles, no characters — just intelligence.
                 </p>
                 <div className="grid gap-3">
                   {Object.entries(MODELS).map(([name, info]) => (
@@ -1473,7 +1500,7 @@ export default function App() {
                         {name.charAt(0)}
                       </div>
                       <div>
-                        <div className="font-bold text-white">{name}</div>
+                        <div className="font-bold text-white">{name} <span className="text-[10px] font-normal text-white/30 uppercase">{info.tier}</span></div>
                         <div className="text-xs text-white/60 mt-1">{info.description}</div>
                       </div>
                     </div>
