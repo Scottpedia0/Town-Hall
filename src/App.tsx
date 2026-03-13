@@ -136,13 +136,20 @@ export default function App() {
     }
   }, [threads]);
 
-  // Persist messages per thread to localStorage
+  // Persist messages + phase per thread to localStorage
   useEffect(() => {
     if (activeThreadId && messages.length > 0) {
       localStorage.setItem(`council_msgs_${activeThreadId}`, JSON.stringify(messages));
       if (recap) localStorage.setItem(`council_recap_${activeThreadId}`, recap);
     }
   }, [messages, recap, activeThreadId]);
+
+  // Persist phase per thread so clarification survives refresh/tab sleep
+  useEffect(() => {
+    if (activeThreadId && phase !== 'idle') {
+      localStorage.setItem(`council_phase_${activeThreadId}`, phase);
+    }
+  }, [phase, activeThreadId]);
 
   // Load messages from localStorage when switching threads
   useEffect(() => {
@@ -156,6 +163,17 @@ export default function App() {
       }
       const savedRecap = localStorage.getItem(`council_recap_${activeThreadId}`);
       if (savedRecap && !recap) setRecap(savedRecap);
+
+      // Restore phase — critical for surviving refresh while awaiting clarification
+      const savedPhase = localStorage.getItem(`council_phase_${activeThreadId}`);
+      if (savedPhase === 'awaiting_clarification') {
+        setPhase('awaiting_clarification');
+        setIsLoading(false);
+        setIsTyping(false);
+      } else if (savedPhase && savedPhase !== 'idle') {
+        // Thread was mid-stream when page died — show as complete (can still follow up)
+        setPhase('idle');
+      }
     }
   }, [activeThreadId]);
 
@@ -503,10 +521,11 @@ export default function App() {
         await readSSEStream(res);
       }
 
-      // Update thread status to complete
+      // Update thread status to complete + clear stored phase
       setThreads(prev => prev.map(t =>
         t.id === activeThreadId ? { ...t, status: 'complete' as const } : t
       ));
+      localStorage.removeItem(`council_phase_${activeThreadId}`);
     } catch (err: any) {
       if (err.name !== 'AbortError') {
         console.error('Failed to resume after clarification', err);
@@ -1412,13 +1431,42 @@ export default function App() {
                 </button>
               </div>
             )}
-            {/* Clarification answer prompt — shown after Round 0 */}
-            {phase === 'awaiting_clarification' && (
+            {/* Clarification answer prompt — shown after Round 0, survives refresh */}
+            {phase === 'awaiting_clarification' && (() => {
+              // Extract clarification questions from messages so user can see them without scrolling
+              const clarificationMsgs = messages.filter(m => m.role === 'model' && m.phase === 'clarification' && m.done && m.text);
+              return (
               <div className="mb-3 p-4 rounded-xl border border-amber-500/30 bg-amber-500/5">
                 <div className="flex items-center gap-2 mb-3">
                   <AlertTriangle className="w-4 h-4 text-amber-400" />
                   <span className="text-sm font-medium text-amber-300">Answer clarifying questions to improve the analysis</span>
                 </div>
+                {/* Pinned questions summary — so user can see them even after long delay or refresh */}
+                {clarificationMsgs.length > 0 && (
+                  <div className="mb-3 max-h-48 overflow-y-auto custom-scrollbar rounded-lg bg-[#0a0a0a] border border-[#262626] p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs text-white/40 uppercase tracking-wider">Questions from the Council</span>
+                      <button
+                        onClick={() => {
+                          const allQs = clarificationMsgs.map(m => `[${(m as any).name || 'Model'}]\n${m.text}`).join('\n\n---\n\n');
+                          navigator.clipboard.writeText(allQs);
+                        }}
+                        className="flex items-center gap-1 text-xs text-white/30 hover:text-white/60 transition-colors"
+                        title="Copy all questions"
+                      >
+                        <Copy className="w-3 h-3" />
+                        Copy
+                      </button>
+                    </div>
+                    {clarificationMsgs.map((m, i) => (
+                      <div key={i} className="mb-2 last:mb-0">
+                        <span className="text-xs font-medium text-amber-400/70">{(m as any).name || 'Model'}:</span>
+                        <div className="text-xs text-white/60 mt-0.5 whitespace-pre-wrap leading-relaxed">{m.text}</div>
+                        {i < clarificationMsgs.length - 1 && <div className="border-t border-white/5 mt-2" />}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <textarea
                   rows={3}
                   value={inputText}
@@ -1431,6 +1479,7 @@ export default function App() {
                   }}
                   placeholder="Type your answers here... (or skip to proceed without answering)"
                   className="w-full bg-[#0a0a0a] border border-[#262626] rounded-xl py-3 px-4 text-sm focus:outline-none focus:border-amber-500/50 transition-all resize-none custom-scrollbar mb-3"
+                  autoFocus
                 />
                 <div className="flex gap-3">
                   <button
@@ -1459,7 +1508,8 @@ export default function App() {
                   </button>
                 </div>
               </div>
-            )}
+              );
+            })()}
             {phase !== 'awaiting_clarification' && (
             <div className="relative group">
               <div className="absolute -inset-1 bg-gradient-to-r from-blue-600/20 to-purple-600/20 rounded-[1.5rem] blur opacity-0 group-focus-within:opacity-100 transition duration-500" />

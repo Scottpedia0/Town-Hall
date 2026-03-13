@@ -284,37 +284,62 @@ async function runClarificationRound(threadId: string, topic: string, modelKeys:
     ? `\n\nAdditional context from the founder:\n${thread.systemContext}\n\n`
     : "";
 
-  // ── ROUND 0: Clarifying Questions ──
+  // ── ROUND 0: Clarifying Questions (single lead model) ──
+  // One model asks — avoids redundant overlapping questions from 3+ models.
+  // Prefer Claude (best at targeted clarification), fall back to first available.
+  const leadModel = models.includes("claude") ? "claude" : models[0];
+  const otherModels = models.filter(k => k !== leadModel);
+
   addMessage(threadId, {
     type: "status", phase: "clarification",
-    text: `Round 0 — Models are asking clarifying questions before diving in`,
+    text: `Round 0 — Asking clarifying questions before the analysis`,
   });
 
-  const clarifyPromises = models.slice(0, 3).map(async (key) => {
-    const cfg = MODELS[key];
-    addMessage(threadId, { type: "message", role: "model", name: key, text: "Thinking about what to ask...", done: false });
+  // Lead model asks main clarifying questions
+  addMessage(threadId, { type: "message", role: "model", name: leadModel, text: "Thinking about what to ask...", done: false });
 
-    const clarifyPrompt = `The founder is asking: ${topic}${contextPrefix}
+  const clarifyPrompt = `The founder is asking: ${topic}${contextPrefix}
 
-Before you analyze this, what 1-3 clarifying questions would help you give a MUCH better answer?
+Before the council analyzes this, what 2-4 clarifying questions would help give a MUCH better answer?
 
 Think about:
-- What assumptions are you making that might be wrong?
-- What context would dramatically change your recommendation?
+- What assumptions might be wrong?
+- What context would dramatically change the recommendation?
 - What constraints or requirements aren't clear?
 
-Be specific and brief. Format as a numbered list. Only ask questions that would genuinely change your analysis — don't ask obvious or filler questions.`;
+Be specific, brief, and practical. Format as a numbered list. Only ask questions that would genuinely change the analysis — no filler.`;
+
+  let leadQuestions = "";
+  try {
+    const response = await callModel(leadModel, clarifyPrompt);
+    trackCost(response.usage);
+    leadQuestions = response.text;
+    addMessage(threadId, { type: "message", role: "model", name: leadModel, text: response.text, done: true, phase: "clarification" });
+  } catch (err: any) {
+    addMessage(threadId, { type: "message", role: "model", name: leadModel, text: `[Error: ${err.message}]`, done: true });
+  }
+
+  // Optional: one other model can add a brief follow-up if it spots a gap
+  if (otherModels.length > 0 && leadQuestions) {
+    const followupModel = otherModels[0];
+    addMessage(threadId, { type: "message", role: "model", name: followupModel, text: "Checking if anything was missed...", done: false });
+
+    const followupPrompt = `The founder is asking: ${topic}${contextPrefix}
+
+Another advisor already asked these clarifying questions (DO NOT repeat any of them):
+
+${leadQuestions}
+
+Is there ONE critical question they missed that would significantly change the analysis? If so, ask it briefly (1-2 sentences). If they covered it well, just say "Good questions — nothing to add." Be extremely brief.`;
 
     try {
-      const response = await callModel(key, clarifyPrompt);
+      const response = await callModel(followupModel, followupPrompt);
       trackCost(response.usage);
-      addMessage(threadId, { type: "message", role: "model", name: key, text: response.text, done: true, phase: "clarification" });
+      addMessage(threadId, { type: "message", role: "model", name: followupModel, text: response.text, done: true, phase: "clarification" });
     } catch (err: any) {
-      addMessage(threadId, { type: "message", role: "model", name: key, text: `[Error: ${err.message}]`, done: true });
+      addMessage(threadId, { type: "message", role: "model", name: followupModel, text: `[Error: ${err.message}]`, done: true });
     }
-  });
-
-  await Promise.all(clarifyPromises);
+  }
 
   // ── PAUSE: Wait for user to answer clarifying questions ──
   thread.status = "awaiting_clarification";
